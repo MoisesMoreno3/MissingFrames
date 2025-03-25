@@ -1,0 +1,93 @@
+
+#Created by Moises Moreno Last updated March 26,2025
+
+import nuke
+import os
+import glob
+import re
+
+def find_missing_frames():
+    """Finds missing frames in a sequence by comparing the expected vs. actual frames on disk."""
+
+    # Get the selected node
+    try:
+        read_node = nuke.selectedNode()
+        if read_node.Class() != "Read":
+            nuke.message("❌ Please select a Read node.")
+            return
+    except ValueError:
+        nuke.message("❌ No node selected. Please select a Read node.")
+        return
+
+    # Get the file path and frame range from the Read node
+    file_path = read_node["file"].value()
+    first_frame = int(read_node["first"].value())
+    last_frame = int(read_node["last"].value())
+
+    missing_frames = []
+    tmp_files = []
+
+    # Get directory and filename pattern
+    dir_path = os.path.dirname(file_path)
+    base_name = os.path.basename(file_path)
+
+    # Detect frame padding
+    match = re.search(r"(#+|%(\d*)d)", base_name)
+    if match:
+        padding_length = int(match.group(2)) if match.group(2) else len(match.group(1))
+        padding_format = f"%0{padding_length}d"
+        file_pattern = base_name.replace(match.group(0), "*")
+    else:
+        padding_format = None  # No padding detected
+
+    # If it's a single-frame file (e.g., .mov, .jpg), just check if the file exists
+    if padding_format is None:
+        if not os.path.exists(file_path):
+            missing_frames.append(first_frame)
+    else:
+        #  **Generate the list of expected file paths**
+        expected_files = {
+            file_path.replace(match.group(0), str(frame).zfill(padding_length)): frame
+            for frame in range(first_frame, last_frame + 1)
+        }
+
+        #  **Get actual files in the directory**
+        actual_files = glob.glob(os.path.join(dir_path, file_pattern))
+
+        #  **Separate TMP files**
+        existing_frames = set()
+        for file in actual_files:
+            if file.endswith(".tmp"):
+                tmp_files.append(file)
+                continue  # Ignore .tmp files
+            
+            # Extract frame numbers dynamically
+            frame_match = re.search(r"(\d+)", os.path.basename(file))
+            if frame_match:
+                frame_number = int(frame_match.group(1))
+                existing_frames.add(frame_number)
+
+        #  **Compare expected frames vs. existing frames**
+        for frame in range(first_frame, last_frame + 1):
+            if frame not in existing_frames:
+                missing_frames.append(frame)
+
+    #  **Format the output message**
+    result_message = ""
+
+    if missing_frames:
+        result_message += f"⚠️ Missing Frames: {missing_frames}\n\n"
+    else:
+        result_message += "✅ No missing frames found.\n\n"
+
+    if tmp_files:
+        tmp_list = "\n".join(tmp_files)
+        result_message += f"⚠️ TMP Files Detected:\n{tmp_list}"
+    else:
+        result_message += "✅ No .tmp files detected."
+
+    # Show results
+    nuke.message(result_message)
+
+# Run the function
+find_missing_frames()
